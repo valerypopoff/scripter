@@ -12,6 +12,51 @@ module.exports = class Scripter
 		this.last_handle_value = undefined;
 	}
 
+	// return functions -------
+	
+		autohandle()
+		{
+			//this.last_handle_value = value;
+			return "__autohandle__";
+		}
+
+		/*
+		rehandle(value)
+		{
+			this.last_handle_value = value;
+			return this._rehandle();
+		}
+
+		_rehandle()
+		{
+			//this.last_handle_value = value;
+			return "__rehandle__"
+		}
+		*/
+
+		error_out_of_scenario()
+		{
+			//this.last_handle_value = value;
+			return "__error_out_of_scenario__";
+		}
+
+		terminate()
+		{
+			return "__terminate__";
+		}
+
+		handle_resolve(result)
+		{
+			return {result: result, marker: "__handle_resolve__"};
+		}
+
+		handle_reject(result)
+		{
+			return {result: result, marker: "__handle_reject__"};
+		}
+
+	//----------------------
+
 	loadProgressForUser(user_id, info)
 	{
 		var promise;
@@ -123,12 +168,16 @@ module.exports = class Scripter
 		if( step_id === undefined )
 			step_id = 0;
 
-		var PROMISE;
+		var INTRO_PROMISE;
 
 		// Try to call intro 
 		try
 		{
-			PROMISE = Promise.resolve( this.scripts[script_id][step_id].intro(obj) );
+			if( this.scripts[script_id][step_id].intro !== undefined )
+				INTRO_PROMISE = Promise.resolve( this.scripts[script_id][step_id].intro(obj) );
+			else
+				// If no intro function defined, treat it like an intro with autohandle
+				INTRO_PROMISE = Promise.resolve( this.autohandle() );
 		}
 		catch(err)
 		{
@@ -139,7 +188,7 @@ module.exports = class Scripter
 		}
 
 		// If intro called successfully
-		return PROMISE
+		return INTRO_PROMISE
 		.then( result => 
 		{
 			this.script_id = script_id;
@@ -155,37 +204,6 @@ module.exports = class Scripter
 				else
 					return result;
 			})
-
-			/*
-				if( result )
-				{
-					this.script_id = script_id;
-					this.step_id = step_id;
-
-					//console.log("curr_data: " + JSON.stringify(this.data) )
-
-					return this.saveProgressForUser(user_id, info)
-					.then(()=>
-					{		
-						//return true;
-						
-						// autohandle
-						//if( this.scripts[script_id][step_id].autohandle )
-						if( result == this.autohandle() )
-						{
-							return this.processForUser(user_id, obj, info, true)
-						}
-						else
-							//return true;
-							return result;
-					})
-
-				} else
-				{
-					//return false;
-					return result;
-				}
-			*/
 		})
 		.catch(err=>
 		{
@@ -194,29 +212,7 @@ module.exports = class Scripter
 		})
 	}
 
-	autohandle()
-	{
-		//this.last_handle_value = value;
-		return "__autohandle__";
-	}
 
-	rehandle(value)
-	{
-		this.last_handle_value = value;
-		return this._rehandle();
-	}
-
-	_rehandle()
-	{
-		//this.last_handle_value = value;
-		return "__rehandle__"
-	}
-
-	error_out_of_scenario()
-	{
-		//this.last_handle_value = value;
-		return "__error_out_of_scenario__";
-	}
 
 	processForUser(user_id, obj, info, noload)
 	{
@@ -266,7 +262,7 @@ module.exports = class Scripter
 			return TERMINATOR_PROMISE
 			.then( terminate => 
 			{
-				if( terminate == true )
+				if( terminate == this.terminate() )
 				{
 					console.log("terminating...")
 					return this._stop(user_id, info);
@@ -287,8 +283,72 @@ module.exports = class Scripter
 							return PROMISE
 							.then( result => 
 							{
+								// if a handler didn't return with handle_success or handle_reject
+								// marker defaults to __handle_reject__
+								if( typeof result != 'object' )
+									result = this.handle_reject(result);
+
 								//console.log("RESULT IS: ", result)
 
+								switch(result.marker)
+								{
+									/*
+									case this._rehandle():
+									{
+										//console.log("REhandled with trueish")
+
+										return this.saveProgressForUser(user_id, info)
+										.then(()=>
+										{
+											//return this.processForUser(user_id, obj, info, true)
+											//return true;
+											return this.last_handle_value;
+										})
+
+									} break;
+									*/
+
+									case this.handle_resolve().marker:
+									{
+										//console.log("Handled with trueish")
+
+										if( this._isThereNextStep() )
+										{
+											return this._nextStepForUser(user_id, obj, info);
+
+										} else
+										{
+											return this._nextStepForUser(user_id, obj, info)
+											.then(()=>
+											{
+												//console.log("RESULT AGAIN IS: ", result)
+
+												return result.result;
+											});
+										}
+
+									} break;
+
+									case this.handle_reject().marker:
+									default:
+									{
+										//console.log("Handled with falsish")
+
+										//if( this.repeat_intro )
+										if( this.scripts[this.script_id][this.step_id].reintro_on_fail )
+											return this.startForUser(user_id, this.script_id, this.step_id, obj, info)
+											.then(()=>
+											{
+												//return false
+												return result.result
+											})
+										else
+											//return false
+											return result.result
+									} break;
+								}
+
+								/*
 								if( result )
 								{
 									if( result == this._rehandle() )
@@ -322,12 +382,13 @@ module.exports = class Scripter
 											});
 										}
 									}
-								} else
+								} 
+								else
 								{
 									//console.log("Handled with falsish")
 
 									//if( this.repeat_intro )
-									if( this.scripts[this.script_id][this.step_id].repeat_on_fail )
+									if( this.scripts[this.script_id][this.step_id].reintro_on_fail )
 										return this.startForUser(user_id, this.script_id, this.step_id, obj, info)
 										.then(()=>
 										{
@@ -338,6 +399,7 @@ module.exports = class Scripter
 										//return false
 										return result
 								}
+								*/
 							})
 
 				}
