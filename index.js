@@ -157,10 +157,34 @@ module.exports = class Scripter
 		
 	}
 
-	startForUser(user_id, script_id, step_id, obj, info)
+	//startForUser(user_id, script_id, step_id, obj, info)
+	startForUser(user_id, script_step_id, opts)
 	{
+		// Reading and assuming parameters --------------------
+		
+		if( Array.isArray(script_step_id) )
+		{
+			var script_id = script_step_id[0];
+			var step_id = script_step_id[1];
+		
+		} else
+		{
+			var script_id = script_step_id;
+			var step_id = 0;
+		}
+
+		var payload = {};
+		var state = {};
+
+		if( opts !== undefined )
+		{
+			payload = opts.payload;
+			state = opts.state;
+		}
+
+
 		//console.log("startForUser:")
-		//console.log("passed obj: ", obj )
+		//console.log("passed payload: ", payload )
 		//console.log("script_id: " + script_id)
 		//console.log("step_id: " + step_id)
 		//console.log("curr_data: ", this.data )
@@ -174,7 +198,7 @@ module.exports = class Scripter
 		try
 		{
 			if( this.scripts[script_id][step_id].intro !== undefined )
-				INTRO_PROMISE = Promise.resolve( this.scripts[script_id][step_id].intro(obj) );
+				INTRO_PROMISE = Promise.resolve( this.scripts[script_id][step_id].intro(payload) );
 			else
 				// If no intro function defined, treat it like an intro with autohandle
 				INTRO_PROMISE = Promise.resolve( this.autohandle() );
@@ -194,12 +218,17 @@ module.exports = class Scripter
 			this.script_id = script_id;
 			this.step_id = step_id;
 
-			return this.saveProgressForUser(user_id, info)
+			return this.saveProgressForUser(user_id, state)
 			.then(()=>
 			{		
 				if( result == this.autohandle() )
 				{
-					return this.processForUser(user_id, obj, info, true)
+					return this.processForUser(user_id, 
+							{
+								payload: payload, 
+								state: state, 
+								noload: true
+							})
 				}
 				else
 					return result;
@@ -214,8 +243,20 @@ module.exports = class Scripter
 
 
 
-	processForUser(user_id, obj, info, noload)
+	//processForUser(user_id, obj, info, noload)
+	processForUser(user_id, opts)
 	{
+		var payload = {};
+		var state = {};
+		var noload = false;
+
+		if( opts !== undefined )
+		{
+			payload = opts.payload;
+			state = opts.state;
+			noload = opts.noload;
+		}
+
 		// console.log("processForUser:")
 		// console.log("user_id: " + user_id)
 		// console.log("curr_data: " + JSON.stringify(this.data) )
@@ -225,7 +266,7 @@ module.exports = class Scripter
 		if( noload )
 			loaded_progress_promise = Promise.resolve(true)
 		else
-			loaded_progress_promise = this.loadProgressForUser(user_id, info);
+			loaded_progress_promise = this.loadProgressForUser(user_id, state);
 
 		return loaded_progress_promise.then(()=>
 		{
@@ -246,7 +287,7 @@ module.exports = class Scripter
 			{
 				try
 				{
-					TERMINATOR_PROMISE = Promise.resolve( this.scripts[this.script_id][this.step_id].terminator(obj) );
+					TERMINATOR_PROMISE = Promise.resolve( this.scripts[this.script_id][this.step_id].terminator(payload) );
 				}
 				catch(err)
 				{
@@ -265,14 +306,14 @@ module.exports = class Scripter
 				if( terminate == this.terminate() )
 				{
 					console.log("terminating...")
-					return this._stop(user_id, info);
+					return this._stop(user_id, state);
 				} else
 				{
 							var PROMISE;
 
 							try
 							{
-								PROMISE = Promise.resolve( this.scripts[this.script_id][this.step_id].handler(obj, noload) );
+								PROMISE = Promise.resolve( this.scripts[this.script_id][this.step_id].handler(payload, noload) );
 							}
 							catch(err)
 							{
@@ -297,10 +338,10 @@ module.exports = class Scripter
 									{
 										//console.log("REhandled with trueish")
 
-										return this.saveProgressForUser(user_id, info)
+										return this.saveProgressForUser(user_id, state)
 										.then(()=>
 										{
-											//return this.processForUser(user_id, obj, info, true)
+											//return this.processForUser(user_id, payload, state, true)
 											//return true;
 											return this.last_handle_value;
 										})
@@ -314,11 +355,11 @@ module.exports = class Scripter
 
 										if( this._isThereNextStep() )
 										{
-											return this._nextStepForUser(user_id, obj, info);
+											return this._nextStepForUser(user_id, payload, state);
 
 										} else
 										{
-											return this._nextStepForUser(user_id, obj, info)
+											return this._nextStepForUser(user_id, payload, state)
 											.then(()=>
 											{
 												//console.log("RESULT AGAIN IS: ", result)
@@ -336,7 +377,11 @@ module.exports = class Scripter
 
 										//if( this.repeat_intro )
 										if( this.scripts[this.script_id][this.step_id].reintro_on_fail )
-											return this.startForUser(user_id, this.script_id, this.step_id, obj, info)
+											return this.startForUser(user_id, [this.script_id, this.step_id], 
+																	{
+																		payload: payload, 
+																		state: state
+																	})
 											.then(()=>
 											{
 												//return false
@@ -348,58 +393,6 @@ module.exports = class Scripter
 									} break;
 								}
 
-								/*
-								if( result )
-								{
-									if( result == this._rehandle() )
-									{
-										//console.log("REhandled with trueish")
-
-										return this.saveProgressForUser(user_id, info)
-										.then(()=>
-										{
-											//return this.processForUser(user_id, obj, info, true)
-											//return true;
-											return this.last_handle_value;
-										})
-									}
-									else
-									{
-										//console.log("Handled with trueish")
-
-										if( this._isThereNextStep() )
-										{
-											return this._nextStepForUser(user_id, obj, info);
-
-										} else
-										{
-											return this._nextStepForUser(user_id, obj, info)
-											.then(()=>
-											{
-												//console.log("RESULT AGAIN IS: ", result)
-
-												return result;
-											});
-										}
-									}
-								} 
-								else
-								{
-									//console.log("Handled with falsish")
-
-									//if( this.repeat_intro )
-									if( this.scripts[this.script_id][this.step_id].reintro_on_fail )
-										return this.startForUser(user_id, this.script_id, this.step_id, obj, info)
-										.then(()=>
-										{
-											//return false
-											return result
-										})
-									else
-										//return false
-										return result
-								}
-								*/
 							})
 
 				}
@@ -424,7 +417,7 @@ module.exports = class Scripter
 		return true;
 	}
 
-	_nextStepForUser(user_id, obj, info)
+	_nextStepForUser(user_id, payload, info)
 	{
 		if( this.scripts === undefined || this.script_id < 0 || this.scripts[this.script_id] === undefined || this.scripts[this.script_id][this.step_id+1] === undefined )
 		{
@@ -432,7 +425,11 @@ module.exports = class Scripter
 			//return Promise.resolve();
 		}
 
-		return this.startForUser(user_id, this.script_id, this.step_id+1, obj, info);
+		return this.startForUser(user_id, [this.script_id, this.step_id+1], 
+								{
+									payload: payload, 
+									state: info
+								});
 	}
 
 	_stop(user_id, info)
